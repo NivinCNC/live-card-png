@@ -1,7 +1,7 @@
 use worker::*;
 use std::collections::HashMap;
 use std::sync::Arc;
-use resvg::usvg::{self, fontdb, Tree, Options};
+use resvg::usvg::{fontdb, Tree, Options};
 use resvg::tiny_skia::{Pixmap, Transform};
 use base64::{Engine as _, engine::general_purpose};
 
@@ -32,7 +32,7 @@ pub async fn main(req: Request, _env: Env, _ctx: worker::Context) -> Result<Resp
     // 3. Render to PNG
     match render_svg_to_png(&svg_string) {
         Ok(png_data) => {
-            let mut headers = Headers::new();
+            let headers = Headers::new();
             headers.set("content-type", "image/png")?;
             headers.set("cache-control", "public, max-age=3600")?;
             
@@ -56,7 +56,7 @@ async fn fetch_image_as_base64(original_url: String) -> String {
         original_url
     );
 
-    let mut headers = Headers::new();
+    let headers = Headers::new();
     headers.set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36").ok();
     
     let req_init = RequestInit {
@@ -113,8 +113,8 @@ fn generate_svg(
     // Use r###"..."### to prevent "unknown prefix" errors
     let event_logo_svg = if !event_logo_b64.is_empty() {
         format!(
-            r###"<circle cx="230" cy="55" r="25" fill="#0f172a"/>
-               <image href="{}" x="205" y="30" width="50" height="50" clip-path="url(#clipCircle25)"/>"###,
+            r###"<circle cx="240" cy="65" r="25" fill="#0f172a"/>
+               <image href="{}" x="215" y="40" width="50" height="50" clip-path="url(#clipCircle25)"/>"###,
             event_logo_b64
         )
     } else { String::new() };
@@ -136,29 +136,31 @@ fn generate_svg(
         <svg width="480" height="280" viewBox="0 0 480 280" xmlns="http://www.w3.org/2000/svg">
           <defs>
             <clipPath id="clipCircle35"><circle cx="0" cy="0" r="35"/></clipPath>
-            <clipPath id="clipCircle25"><circle cx="230" cy="55" r="25"/></clipPath>
+            <clipPath id="clipCircle25"><circle cx="240" cy="65" r="25"/></clipPath>
           </defs>
 
           <rect width="480" height="280" rx="20" fill="#111827"/>
           
-          <text x="20" y="35" fill="#E5E7EB" font-size="18" font-family="Roboto">{title}</text>
-          <text x="460" y="35" fill="#9CA3AF" font-size="14" font-family="Roboto" text-anchor="end">{time}</text>
-          
-          <rect x="20" y="45" width="80" height="21" rx="10" fill="{status_color}"/>
-          <text x="60" y="60" fill="#FFF" font-size="13" font-family="Roboto" text-anchor="middle">{status_text}</text>
-          
-          {event_logo_svg}
-          
-          <g transform="translate(60, 120)">
-            {team_a_svg}
-            <text y="60" fill="#FFF" font-size="16" font-family="Roboto" text-anchor="middle">{team_a}</text>
-          </g>
-          
-          <text x="240" y="160" fill="#FACC15" font-size="32" font-weight="bold" font-family="Roboto" text-anchor="middle">VS</text>
-          
-          <g transform="translate(420, 120)">
-            {team_b_svg}
-            <text y="60" fill="#FFF" font-size="16" font-family="Roboto" text-anchor="middle">{team_b}</text>
+          <g transform="translate(30, 0)">
+            <text x="0" y="45" fill="#E5E7EB" font-size="18" font-family="Roboto">{title}</text>
+            <text x="420" y="45" fill="#9CA3AF" font-size="14" font-family="Roboto" text-anchor="end">{time}</text>
+            
+            <rect x="0" y="55" width="80" height="21" rx="10" fill="{status_color}"/>
+            <text x="40" y="70" fill="#FFF" font-size="13" font-family="Roboto" text-anchor="middle">{status_text}</text>
+            
+            {event_logo_svg}
+            
+            <g transform="translate(80, 155)">
+              {team_a_svg}
+              <text y="60" fill="#FFF" font-size="16" font-family="Roboto" text-anchor="middle">{team_a}</text>
+            </g>
+            
+            <text x="210" y="195" fill="#FACC15" font-size="32" font-weight="bold" font-family="Roboto" text-anchor="middle">VS</text>
+            
+            <g transform="translate(340, 155)">
+              {team_b_svg}
+              <text y="60" fill="#FFF" font-size="16" font-family="Roboto" text-anchor="middle">{team_b}</text>
+            </g>
           </g>
         </svg>
         "###,
