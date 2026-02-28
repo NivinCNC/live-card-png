@@ -151,13 +151,17 @@ fn generate_svg(
 
     // Build the teams section based on layout mode
     let teams_section = if team_a_only {
-        // Solo mode: center teamA image at x=210 (horizontal center of the 420-wide inner area)
+        // Solo mode: larger centered teamA image (radius 55, 110x110)
+        let team_a_big = format!(
+            r###"<image href="{}" x="-55" y="-55" width="110" height="110"/>"###,
+            team_a_b64
+        );
         format!(
-            r###"<g transform="translate(210, 155)">
-              {team_a_svg}
-              <text y="60" fill="#FFF" font-size="16" font-family="Roboto" text-anchor="middle">{team_a}</text>
+            r###"<g transform="translate(210, 150)">
+              {team_a_big}
+              <text y="80" fill="#FFF" font-size="18" font-family="Roboto" text-anchor="middle">{team_a}</text>
             </g>"###,
-            team_a_svg = team_a_svg,
+            team_a_big = team_a_big,
             team_a = escape_xml(team_a)
         )
     } else {
@@ -184,6 +188,7 @@ fn generate_svg(
         <svg width="480" height="280" viewBox="0 0 480 280" xmlns="http://www.w3.org/2000/svg">
           <defs>
             <clipPath id="clipCircle35"><circle cx="0" cy="0" r="35"/></clipPath>
+            <clipPath id="clipCircle55"><circle cx="0" cy="0" r="55"/></clipPath>
             <clipPath id="clipCircle25"><circle cx="240" cy="65" r="25"/></clipPath>
           </defs>
 

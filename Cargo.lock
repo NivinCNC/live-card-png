@@ -485,6 +485,7 @@ dependencies = [
  "base64",
  "console_error_panic_hook",
  "futures",
+ "js-sys",
  "resvg",
  "serde",
  "serde_json",
