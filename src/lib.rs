@@ -26,8 +26,17 @@ pub async fn main(req: Request, _env: Env, _ctx: worker::Context) -> Result<Resp
         fetch_image_as_base64(event_logo_url)
     );
 
-    // 2. Generate SVG String
-    let svg_string = generate_svg(&query, &team_a_b64, &team_b_b64, &event_logo_b64);
+    // 2. Determine if event has ended using the `time` param (Unix timestamp in seconds)
+    let is_ended = if let Some(ts_str) = query.get("time") {
+        if let Ok(ts) = ts_str.parse::<u64>() {
+            let now_ms = js_sys::Date::now() as u64;
+            let now_secs = now_ms / 1000;
+            ts < now_secs
+        } else { false }
+    } else { false };
+
+    // 3. Generate SVG String
+    let svg_string = generate_svg(&query, &team_a_b64, &team_b_b64, &event_logo_b64, is_ended);
 
     // 3. Render to PNG
     match render_svg_to_png(&svg_string) {
@@ -99,7 +108,8 @@ fn generate_svg(
     params: &HashMap<String, String>, 
     team_a_b64: &str, 
     team_b_b64: &str, 
-    event_logo_b64: &str
+    event_logo_b64: &str,
+    is_ended: bool
 ) -> String {
     let title = params.get("title").map(|s| s.as_str()).unwrap_or("Match");
     let team_a = params.get("teamA").map(|s| s.as_str()).unwrap_or("Team A");
@@ -107,8 +117,16 @@ fn generate_svg(
     let time = params.get("time").map(|s| s.as_str()).unwrap_or("00:00");
     let is_live = params.get("isLive").map(|s| s == "true").unwrap_or(false);
 
-    let status_text = if is_live { "LIVE" } else { "UPCOMING" };
-    let status_color = if is_live { "#EF4444" } else { "#6B7280" };
+    let (status_text, status_color) = if is_live {
+        ("LIVE", "#EF4444")
+    } else if is_ended {
+        ("ENDED", "#6B7280")
+    } else {
+        ("UPCOMING", "#3B82F6")
+    };
+
+    // Determine layout mode: solo teamA (centered) vs normal (VS)
+    let team_a_only = !team_a_b64.is_empty() && team_b_b64.is_empty();
 
     // Use r###"..."### to prevent "unknown prefix" errors
     let event_logo_svg = if !event_logo_b64.is_empty() {
@@ -131,6 +149,36 @@ fn generate_svg(
         r###"<circle cx="0" cy="0" r="35" fill="#333"/>"###.to_string()
     };
 
+    // Build the teams section based on layout mode
+    let teams_section = if team_a_only {
+        // Solo mode: center teamA image at x=210 (horizontal center of the 420-wide inner area)
+        format!(
+            r###"<g transform="translate(210, 155)">
+              {team_a_svg}
+              <text y="60" fill="#FFF" font-size="16" font-family="Roboto" text-anchor="middle">{team_a}</text>
+            </g>"###,
+            team_a_svg = team_a_svg,
+            team_a = escape_xml(team_a)
+        )
+    } else {
+        // Normal mode: teamA on left, VS in center, teamB on right
+        format!(
+            r###"<g transform="translate(80, 155)">
+              {team_a_svg}
+              <text y="60" fill="#FFF" font-size="16" font-family="Roboto" text-anchor="middle">{team_a}</text>
+            </g>
+            <text x="210" y="195" fill="#FACC15" font-size="32" font-weight="bold" font-family="Roboto" text-anchor="middle">VS</text>
+            <g transform="translate(340, 155)">
+              {team_b_svg}
+              <text y="60" fill="#FFF" font-size="16" font-family="Roboto" text-anchor="middle">{team_b}</text>
+            </g>"###,
+            team_a_svg = team_a_svg,
+            team_a = escape_xml(team_a),
+            team_b_svg = team_b_svg,
+            team_b = escape_xml(team_b)
+        )
+    };
+
     format!(
         r###"
         <svg width="480" height="280" viewBox="0 0 480 280" xmlns="http://www.w3.org/2000/svg">
@@ -150,17 +198,7 @@ fn generate_svg(
             
             {event_logo_svg}
             
-            <g transform="translate(80, 155)">
-              {team_a_svg}
-              <text y="60" fill="#FFF" font-size="16" font-family="Roboto" text-anchor="middle">{team_a}</text>
-            </g>
-            
-            <text x="210" y="195" fill="#FACC15" font-size="32" font-weight="bold" font-family="Roboto" text-anchor="middle">VS</text>
-            
-            <g transform="translate(340, 155)">
-              {team_b_svg}
-              <text y="60" fill="#FFF" font-size="16" font-family="Roboto" text-anchor="middle">{team_b}</text>
-            </g>
+            {teams_section}
           </g>
         </svg>
         "###,
@@ -169,10 +207,7 @@ fn generate_svg(
         status_color = status_color,
         status_text = status_text,
         event_logo_svg = event_logo_svg,
-        team_a_svg = team_a_svg,
-        team_a = escape_xml(team_a),
-        team_b_svg = team_b_svg,
-        team_b = escape_xml(team_b)
+        teams_section = teams_section
     )
 }
 
