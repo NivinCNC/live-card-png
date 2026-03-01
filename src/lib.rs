@@ -26,23 +26,27 @@ pub async fn main(req: Request, _env: Env, _ctx: worker::Context) -> Result<Resp
         fetch_image_as_base64(event_logo_url)
     );
 
-    // 2. Determine if event has ended using the `time` param (Unix timestamp in seconds or date string)
-    let is_ended = if let Some(ts_str) = query.get("time") {
-        // Try parsing as Unix timestamp first
-        if let Ok(ts) = ts_str.parse::<u64>() {
-            let now_ms = js_sys::Date::now() as u64;
-            let now_secs = now_ms / 1000;
-            ts < now_secs
-        } else {
-            // Try parsing as a date string using JavaScript Date
-            let parsed_date = js_sys::Date::new(&wasm_bindgen::JsValue::from_str(ts_str));
-            if !parsed_date.get_time().is_nan() {
-                let event_time_ms = parsed_date.get_time() as u64;
-                let now_ms = js_sys::Date::now() as u64;
-                event_time_ms < now_ms
-            } else { false }
-        }
-    } else { false };
+    // 2. Determine if event has ended. Prefer explicit `isEnded` query param.
+    // If missing, fall back to the previous `time` parsing (unix ts or date string).
+    let is_ended = query.get("isEnded")
+        .map(|s| s == "true")
+        .or_else(|| {
+            query.get("time").map(|ts_str| {
+                if let Ok(ts) = ts_str.parse::<u64>() {
+                    let now_ms = js_sys::Date::now() as u64;
+                    let now_secs = now_ms / 1000;
+                    ts < now_secs
+                } else {
+                    let parsed_date = js_sys::Date::new(&wasm_bindgen::JsValue::from_str(ts_str));
+                    if !parsed_date.get_time().is_nan() {
+                        let event_time_ms = parsed_date.get_time() as u64;
+                        let now_ms = js_sys::Date::now() as u64;
+                        event_time_ms < now_ms
+                    } else { false }
+                }
+            })
+        })
+        .unwrap_or(false);
 
     // 3. Generate SVG String
     let svg_string = generate_svg(&query, &team_a_b64, &team_b_b64, &event_logo_b64, is_ended);
