@@ -26,13 +26,22 @@ pub async fn main(req: Request, _env: Env, _ctx: worker::Context) -> Result<Resp
         fetch_image_as_base64(event_logo_url)
     );
 
-    // 2. Determine if event has ended using the `time` param (Unix timestamp in seconds)
+    // 2. Determine if event has ended using the `time` param (Unix timestamp in seconds or date string)
     let is_ended = if let Some(ts_str) = query.get("time") {
+        // Try parsing as Unix timestamp first
         if let Ok(ts) = ts_str.parse::<u64>() {
             let now_ms = js_sys::Date::now() as u64;
             let now_secs = now_ms / 1000;
             ts < now_secs
-        } else { false }
+        } else {
+            // Try parsing as a date string using JavaScript Date
+            let parsed_date = js_sys::Date::new(&wasm_bindgen::JsValue::from_str(ts_str));
+            if !parsed_date.get_time().is_nan() {
+                let event_time_ms = parsed_date.get_time() as u64;
+                let now_ms = js_sys::Date::now() as u64;
+                event_time_ms < now_ms
+            } else { false }
+        }
     } else { false };
 
     // 3. Generate SVG String
@@ -131,8 +140,8 @@ fn generate_svg(
     // Use r###"..."### to prevent "unknown prefix" errors
     let event_logo_svg = if !event_logo_b64.is_empty() {
         format!(
-            r###"<circle cx="240" cy="65" r="25" fill="#0f172a"/>
-               <image href="{}" x="215" y="40" width="50" height="50" clip-path="url(#clipCircle25)"/>"###,
+            r###"<circle cx="210" cy="65" r="25" fill="#0f172a"/>
+               <image href="{}" x="185" y="40" width="50" height="50" clip-path="url(#clipCircle25)"/>"###,
             event_logo_b64
         )
     } else { String::new() };
@@ -151,17 +160,13 @@ fn generate_svg(
 
     // Build the teams section based on layout mode
     let teams_section = if team_a_only {
-        // Solo mode: larger centered teamA image (radius 55, 110x110)
-        let team_a_big = format!(
-            r###"<image href="{}" x="-55" y="-55" width="110" height="110"/>"###,
-            team_a_b64
-        );
+        // Solo mode: full-width centered teamA image
         format!(
-            r###"<g transform="translate(210, 150)">
-              {team_a_big}
+            r###"<g transform="translate(210, 140)">
+              <image href="{team_a_img}" x="-230" y="-55" width="460" height="110" preserveAspectRatio="xMidYMid meet"/>
               <text y="80" fill="#FFF" font-size="18" font-family="Roboto" text-anchor="middle">{team_a}</text>
             </g>"###,
-            team_a_big = team_a_big,
+            team_a_img = team_a_b64,
             team_a = escape_xml(team_a)
         )
     } else {
@@ -189,7 +194,7 @@ fn generate_svg(
           <defs>
             <clipPath id="clipCircle35"><circle cx="0" cy="0" r="35"/></clipPath>
             <clipPath id="clipCircle55"><circle cx="0" cy="0" r="55"/></clipPath>
-            <clipPath id="clipCircle25"><circle cx="240" cy="65" r="25"/></clipPath>
+            <clipPath id="clipCircle25"><circle cx="210" cy="65" r="25"/></clipPath>
           </defs>
 
           <rect width="480" height="280" rx="20" fill="#111827"/>
