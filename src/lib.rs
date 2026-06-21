@@ -4,7 +4,6 @@ use std::sync::Arc;
 use resvg::usvg::{fontdb, Tree, Options};
 use resvg::tiny_skia::{Pixmap, Transform};
 use base64::{Engine as _, engine::general_purpose};
-
 // Embed the font directly into the WASM binary
 const FONT_DATA: &[u8] = include_bytes!("fonts/Roboto-Regular.ttf");
 
@@ -70,25 +69,15 @@ pub async fn main(req: Request, _env: Env, _ctx: worker::Context) -> Result<Resp
 // UPDATED: Now detects MIME type (jpg/png) correctly
 async fn fetch_image_as_base64(original_url: String) -> String {
     if original_url.is_empty() { return String::new(); }
-
-    // THE FIX: Route through a public caching proxy (wsrv.nl)
-    // This bypasses the IP block from Sofascore.
-    let target_url = format!(
-        "https://external-content.duckduckgo.com/iu/?u={}&f=1", 
-        original_url
-    );
-
     let headers = Headers::new();
     headers.set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36").ok();
-    
-    let req_init = RequestInit {
-        method: Method::Get,
-        headers,
-        ..Default::default()
-    };
+
+    let mut req_init = RequestInit::new();
+    req_init.with_method(Method::Get);
+    req_init.with_headers(headers);
 
     // Construct request
-    let req = match Request::new_with_init(&target_url, &req_init) {
+    let req = match Request::new_with_init(&original_url, &req_init) {
         Ok(r) => r,
         Err(e) => {
             console_log!("Invalid URL: {}", e);
@@ -109,7 +98,7 @@ async fn fetch_image_as_base64(original_url: String) -> String {
                     return format!("data:{};base64,{}", mime_type, b64); 
                 }
             } else {
-                console_log!("Proxy failed for {}: Status {}", target_url, resp.status_code());
+                console_log!("Proxy failed for {}: Status {}", original_url, resp.status_code());
             }
         }
         Err(e) => console_log!("Network error: {}", e),
@@ -214,6 +203,7 @@ fn generate_svg(
             
             {teams_section}
           </g>
+          <text x="460" y="270" fill="#4B5563" font-size="11" font-family="Roboto" text-anchor="end">&#169; CNCVerse</text>
         </svg>
         "###,
         title = escape_xml(title),
