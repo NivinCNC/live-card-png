@@ -30,7 +30,7 @@ const FONTS: [&[u8]; 3] = [
     include_bytes!("../../src/fonts/Poppins-Bold.ttf"),
 ];
 /// Bump when the design changes, so no earlier card is served from the cache.
-const DESIGN: &str = "poster-5";
+const DESIGN: &str = "poster-6";
 /// How long a rendered card is reused. Short: "upcoming" turns into "ended" by the clock.
 const CARD_TTL: Duration = Duration::from_secs(10 * 60);
 /// How long a fetched logo is reused.

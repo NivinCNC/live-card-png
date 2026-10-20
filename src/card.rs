@@ -39,16 +39,23 @@ pub fn generate_svg(
     // LIVE gets a halo around its dot
     let halo = if is_live { r###"<circle cx="92" cy="70" r="15" fill="#EF4444" fill-opacity="0.28"/>"### } else { "" };
 
-    // Solo layout: one wide image (e.g. a race or a tournament banner), one colour
-    let solo = !team_a_b64.is_empty() && team_b_b64.is_empty();
-    let ca = colors[0].unwrap_or(DEFAULT_COLORS[0]);
+    // Solo layout: one name (a race, a show, a tournament) or one wide image, one colour.
+    // No teamB, the same name twice ("Darts" vs "Darts"), or an A image without a B image.
+    let team_b_given = params.get("teamB").map(|s| s.trim()).filter(|s| !s.is_empty());
+    let same_name = team_b_given.map_or(true, |b| b.eq_ignore_ascii_case(team_a.trim()));
+    let solo = same_name || (!team_a_b64.is_empty() && team_b_b64.is_empty());
+    let solo_img = if team_a_b64.is_empty() { team_b_b64 } else { team_a_b64 };
+    let ca = if team_a_b64.is_empty() && !team_b_b64.is_empty() { colors[1] } else { colors[0] }.unwrap_or(DEFAULT_COLORS[0]);
     let cb = if solo { ca } else { colors[1].unwrap_or(DEFAULT_COLORS[1]) };
 
-    let teams = if solo {
+    let teams = if solo && solo_img.is_empty() {
+        // No image at all: the name alone, larger, in the middle
+        team_name(team_a, 480.0, 300.0, 760.0)
+    } else if solo {
         format!(
             r###"<image href="{img}" x="140" y="150" width="680" height="250" preserveAspectRatio="xMidYMid meet" filter="url(#shadow)"/>
             {name}"###,
-            img = team_a_b64,
+            img = solo_img,
             name = team_name(team_a, 480.0, 466.0, 700.0)
         )
     } else {
