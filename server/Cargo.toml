@@ -1,0 +1,22 @@
+[package]
+name = "live-card-server"
+version = "0.1.0"
+edition = "2021"
+
+# The same card as the Worker, as a native HTTP server (no per-request limits)
+[dependencies]
+axum = { version = "0.7", default-features = false, features = ["http1", "tokio", "query"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time", "fs"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+resvg = { version = "0.43.0", default-features = false, features = ["text", "raster-images"] }
+usvg = { version = "0.43.0", default-features = false, features = ["text"] }
+base64 = "0.22"
+chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
+sha2 = "0.10"
+lru = "0.12"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+strip = true
