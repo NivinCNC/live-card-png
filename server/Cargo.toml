@@ -14,6 +14,7 @@ base64 = "0.22"
 chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
 sha2 = "0.10"
 lru = "0.12"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp", "gif"] }
 
 [profile.release]
 opt-level = 3

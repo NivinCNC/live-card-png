@@ -8,6 +8,8 @@ use resvg::tiny_skia::{Pixmap, Transform};
 use base64::{Engine as _, engine::general_purpose};
 // Embed the font directly into the WASM binary
 const FONT_DATA: &[u8] = include_bytes!("fonts/Roboto-Regular.ttf");
+const FONT_SEMIBOLD: &[u8] = include_bytes!("fonts/Poppins-SemiBold.ttf");
+const FONT_BOLD: &[u8] = include_bytes!("fonts/Poppins-Bold.ttf");
 
 #[event(fetch)]
 pub async fn main(req: Request, _env: Env, _ctx: worker::Context) -> Result<Response> {
@@ -50,7 +52,7 @@ pub async fn main(req: Request, _env: Env, _ctx: worker::Context) -> Result<Resp
         .unwrap_or(false);
 
     // 3. Generate SVG String
-    let svg_string = generate_svg(&query, &team_a_b64, &team_b_b64, &event_logo_b64, is_ended);
+    let svg_string = generate_svg(&query, &team_a_b64, &team_b_b64, &event_logo_b64, is_ended, [None, None]);
 
     // 3. Render to PNG
     match render_svg_to_png(&svg_string) {
@@ -110,7 +112,9 @@ async fn fetch_image_as_base64(original_url: String) -> String {
 
 fn render_svg_to_png(svg_data: &str) -> Result<Vec<u8>, String> {
     let mut fontdb = fontdb::Database::new();
-    fontdb.load_font_data(FONT_DATA.to_vec()); 
+    fontdb.load_font_data(FONT_DATA.to_vec());
+    fontdb.load_font_data(FONT_SEMIBOLD.to_vec());
+    fontdb.load_font_data(FONT_BOLD.to_vec()); 
 
     let opt = Options {
         fontdb: Arc::new(fontdb), 

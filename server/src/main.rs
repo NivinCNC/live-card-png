@@ -24,7 +24,13 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 use tokio::sync::{OnceCell, Semaphore};
 
-const FONT_DATA: &[u8] = include_bytes!("../../src/fonts/Roboto-Regular.ttf");
+const FONTS: [&[u8]; 3] = [
+    include_bytes!("../../src/fonts/Roboto-Regular.ttf"),
+    include_bytes!("../../src/fonts/Poppins-SemiBold.ttf"),
+    include_bytes!("../../src/fonts/Poppins-Bold.ttf"),
+];
+/// Bump when the design changes, so no earlier card is served from the cache.
+const DESIGN: &str = "poster-5";
 /// How long a rendered card is reused. Short: "upcoming" turns into "ended" by the clock.
 const CARD_TTL: Duration = Duration::from_secs(10 * 60);
 /// How long a fetched logo is reused.
@@ -33,13 +39,15 @@ const MAX_IMAGE_BYTES: usize = 3 << 20;
 const UA: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36";
 
 type Shared<T> = Arc<OnceCell<T>>;
+/// A fetched image as a data: URI (empty when it couldn't be fetched) and its main colour.
+type Logo = (String, Option<(u8, u8, u8)>);
 
 struct App {
     http: reqwest::Client,
     options: Options<'static>,
     render_slots: Semaphore,
     cards: Mutex<LruCache<String, (Instant, Shared<Result<Arc<Vec<u8>>, String>>)>>,
-    images: Mutex<LruCache<String, (Instant, Shared<String>)>>,
+    images: Mutex<LruCache<String, (Instant, Shared<Logo>)>>,
     disk: Option<PathBuf>,
 }
 
@@ -51,7 +59,9 @@ async fn main() {
         let _ = std::fs::create_dir_all(d);
     }
     let mut db = fontdb::Database::new();
-    db.load_font_data(FONT_DATA.to_vec());
+    for f in FONTS {
+        db.load_font_data(f.to_vec());
+    }
     let cpus = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1);
     let app = Arc::new(App {
         http: reqwest::Client::builder()
@@ -82,7 +92,7 @@ async fn main() {
 async fn card_handler(State(app): State<Arc<App>>, Query(query): Query<HashMap<String, String>>) -> Response {
     // Same query in any order → same card
     let sorted: BTreeMap<_, _> = query.iter().collect();
-    let key = hex(&Sha256::digest(format!("{sorted:?}").as_bytes()));
+    let key = hex(&Sha256::digest(format!("{DESIGN}{sorted:?}").as_bytes()));
 
     let cell = {
         let mut cards = app.cards.lock().unwrap();
@@ -97,10 +107,10 @@ async fn card_handler(State(app): State<Arc<App>>, Query(query): Query<HashMap<S
     };
     let result = cell.get_or_init(|| make_card(app.clone(), key.clone(), query)).await.clone();
     match result {
-        Ok(png) => {
-            let mut resp = (*png).clone().into_response();
+        Ok(jpg) => {
+            let mut resp = (*jpg).clone().into_response();
             let h = resp.headers_mut();
-            h.insert(header::CONTENT_TYPE, HeaderValue::from_static("image/png"));
+            h.insert(header::CONTENT_TYPE, HeaderValue::from_static("image/jpeg"));
             h.insert(header::CACHE_CONTROL, HeaderValue::from_static("public, max-age=3600"));
             h.insert(header::ACCESS_CONTROL_ALLOW_ORIGIN, HeaderValue::from_static("*"));
             resp
@@ -115,7 +125,7 @@ async fn card_handler(State(app): State<Arc<App>>, Query(query): Query<HashMap<S
 
 async fn make_card(app: Arc<App>, key: String, query: HashMap<String, String>) -> Result<Arc<Vec<u8>>, String> {
     // A card rendered by an earlier run (or evicted from memory) is read back from disk
-    let path = app.disk.as_ref().map(|d| d.join(format!("{key}.png")));
+    let path = app.disk.as_ref().map(|d| d.join(format!("{key}.jpg")));
     if let Some(p) = &path {
         if let Ok(meta) = tokio::fs::metadata(p).await {
             let fresh = meta.modified().ok().and_then(|m| m.elapsed().ok()).is_some_and(|age| age < CARD_TTL);
@@ -133,50 +143,50 @@ async fn make_card(app: Arc<App>, key: String, query: HashMap<String, String>) -
         image_data_uri(&app, get("teamBImg")),
         image_data_uri(&app, get("eventLogo")),
     );
-    let svg = card::generate_svg(&query, &a, &b, &logo, is_ended(&query));
+    let svg = card::generate_svg(&query, &a.0, &b.0, &logo.0, is_ended(&query), [a.1, b.1]);
 
     let _slot = app.render_slots.acquire().await.map_err(|e| e.to_string())?;
     let app2 = app.clone();
-    let png = tokio::task::spawn_blocking(move || render(&app2.options, &svg))
+    let jpg = tokio::task::spawn_blocking(move || render(&app2.options, &svg))
         .await
         .map_err(|e| e.to_string())??;
     if let Some(p) = path {
         let tmp = p.with_extension("tmp");
-        if tokio::fs::write(&tmp, &png).await.is_ok() {
+        if tokio::fs::write(&tmp, &jpg).await.is_ok() {
             let _ = tokio::fs::rename(&tmp, &p).await;
         }
     }
-    Ok(Arc::new(png))
+    Ok(Arc::new(jpg))
 }
 
-/// The image at [url] as a data: URI (empty when it can't be fetched), shared and cached.
-async fn image_data_uri(app: &Arc<App>, url: String) -> String {
+/// The image at [url] as a data: URI with its main colour, shared and cached.
+async fn image_data_uri(app: &Arc<App>, url: String) -> Logo {
     if url.is_empty() {
-        return String::new();
+        return (String::new(), None);
     }
     let cell = {
         let mut images = app.images.lock().unwrap();
         match images.get(&url) {
             Some((at, cell)) if at.elapsed() < IMAGE_TTL => cell.clone(),
             _ => {
-                let cell: Shared<String> = Arc::new(OnceCell::new());
+                let cell: Shared<Logo> = Arc::new(OnceCell::new());
                 images.put(url.clone(), (Instant::now(), cell.clone()));
                 cell
             }
         }
     };
-    let uri = cell.get_or_init(|| fetch_image(app.http.clone(), url.clone())).await.clone();
-    if uri.is_empty() {
+    let logo = cell.get_or_init(|| fetch_image(app.http.clone(), url.clone())).await.clone();
+    if logo.0.is_empty() {
         // A failed fetch is retried by the next card that needs it
         app.images.lock().unwrap().pop(&url);
     }
-    uri
+    logo
 }
 
-async fn fetch_image(http: reqwest::Client, url: String) -> String {
-    let Ok(resp) = http.get(&url).send().await else { return String::new() };
+async fn fetch_image(http: reqwest::Client, url: String) -> Logo {
+    let Ok(resp) = http.get(&url).send().await else { return (String::new(), None) };
     if resp.status() != reqwest::StatusCode::OK {
-        return String::new();
+        return (String::new(), None);
     }
     let mime = resp
         .headers()
@@ -185,9 +195,63 @@ async fn fetch_image(http: reqwest::Client, url: String) -> String {
         .unwrap_or("image/png")
         .to_string();
     match resp.bytes().await {
-        Ok(b) if b.len() <= MAX_IMAGE_BYTES => format!("data:{mime};base64,{}", general_purpose::STANDARD.encode(&b)),
-        _ => String::new(),
+        Ok(b) if b.len() <= MAX_IMAGE_BYTES => {
+            let bytes = b.to_vec();
+            let color = tokio::task::spawn_blocking(move || main_color(&bytes)).await.ok().flatten();
+            (format!("data:{mime};base64,{}", general_purpose::STANDARD.encode(&b)), color)
+        }
+        _ => (String::new(), None),
     }
+}
+
+/// A logo's main colour: the most common clearly coloured hue (white, black, grey and
+/// see-through pixels don't count), brightened to a usable tint. None for colourless logos.
+fn main_color(bytes: &[u8]) -> Option<(u8, u8, u8)> {
+    let img = image::load_from_memory(bytes).ok()?.thumbnail(48, 48).to_rgba8();
+    const BUCKETS: usize = 18;
+    let mut weight = [0f32; BUCKETS];
+    let mut sum = [[0f32; 3]; BUCKETS];
+    let mut counted = 0f32;
+    for p in img.pixels() {
+        let [r, g, b, a] = p.0;
+        if a < 160 {
+            continue;
+        }
+        counted += 1.0;
+        let (rf, gf, bf) = (r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0);
+        let max = rf.max(gf).max(bf);
+        let min = rf.min(gf).min(bf);
+        let (s, v) = (if max > 0.0 { (max - min) / max } else { 0.0 }, max);
+        if s < 0.28 || v < 0.2 {
+            continue;
+        }
+        let d = max - min;
+        let sector = if max == rf { ((gf - bf) / d).rem_euclid(6.0) } else if max == gf { (bf - rf) / d + 2.0 } else { (rf - gf) / d + 4.0 };
+        let h = sector / 6.0;
+        let i = ((h * BUCKETS as f32) as usize).min(BUCKETS - 1);
+        // Gold/yellow is mostly trim on crests (Man United, Barcelona): it counts for less
+        let gold = if (0.10..0.19).contains(&h) { 0.7 } else { 1.0 };
+        let w = s * v * gold;
+        weight[i] += w;
+        sum[i][0] += rf * w;
+        sum[i][1] += gf * w;
+        sum[i][2] += bf * w;
+    }
+    // Each hue with its neighbours, around the wheel: red sits at both ends (~355° and ~5°)
+    // and would otherwise be split in two and lose to a smaller colour
+    let near = |i: usize| [(i + BUCKETS - 1) % BUCKETS, i, (i + 1) % BUCKETS];
+    let score = |i: usize| near(i).iter().map(|&j| weight[j]).sum::<f32>();
+    let i = (0..BUCKETS).max_by(|&a, &b| score(a).total_cmp(&score(b)))?;
+    let w = score(i);
+    // Too little colour (a mostly black/white crest): use the theme instead
+    if counted == 0.0 || w < counted * 0.04 {
+        return None;
+    }
+    let total = |c: usize| near(i).iter().map(|&j| sum[j][c]).sum::<f32>();
+    let (r, g, b) = (total(0) / w, total(1) / w, total(2) / w);
+    let k = 0.9 / r.max(g).max(b).max(0.01);
+    let c = |v: f32| ((v * k).clamp(0.0, 1.0) * 255.0).round() as u8;
+    Some((c(r), c(g), c(b)))
 }
 
 fn render(options: &Options, svg: &str) -> Result<Vec<u8>, String> {
@@ -195,7 +259,13 @@ fn render(options: &Options, svg: &str) -> Result<Vec<u8>, String> {
     let size = tree.size().to_int_size();
     let mut pixmap = Pixmap::new(size.width(), size.height()).ok_or("Failed to create pixmap")?;
     resvg::render(&tree, Transform::identity(), &mut pixmap.as_mut());
-    pixmap.encode_png().map_err(|e| format!("PNG Encode Error: {e}"))
+    // JPEG (the poster is opaque): about a quarter of the PNG's size
+    let rgb: Vec<u8> = pixmap.data().chunks_exact(4).flat_map(|p| [p[0], p[1], p[2]]).collect();
+    let mut out = Vec::with_capacity(96 * 1024);
+    image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, 86)
+        .encode(&rgb, size.width(), size.height(), image::ExtendedColorType::Rgb8)
+        .map_err(|e| format!("JPEG Encode Error: {e}"))?;
+    Ok(out)
 }
 
 /// As the Worker: `isEnded` when given, else whether `time` (unix seconds or a date) has passed.
